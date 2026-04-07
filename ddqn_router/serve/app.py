@@ -33,7 +33,7 @@ def create_app(
     from ddqn_router.inference.router import DDQNRouter
 
     ddqn_router = DDQNRouter.load(artifacts_path)
-    app = FastAPI(title="ddqn-router", version="0.1.0")
+    app = FastAPI(title="ddqn-router", version="0.2.0")
 
     if cors_origins is not None:
         app.add_middleware(

@@ -88,10 +88,26 @@ Standard DQN suffers from Q-value overestimation — it uses the same network to
 
 ## Quickstart
 
+[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/kirmoz1997/ddqn-router/blob/main/examples/quickstart.ipynb)
+
 ### 1. Install
 
 ```bash
-pip install -e .
+pip install ddqn-router
+```
+
+Or install with the optional FastAPI server:
+
+```bash
+pip install ddqn-router[serve]
+```
+
+For development (from source):
+
+```bash
+git clone https://github.com/kirmoz1997/ddqn-router
+cd ddqn-router
+pip install -e ".[dev]"
 ```
 
 ### 2. Define your agents
@@ -442,3 +458,25 @@ ddqn_router/
 ## Research Background
 
 Based on ["Multi-Agent Set Routing with Double DQN"](https://github.com/kirmoz1997/dqn_routing_research). All default hyperparameters in this library come directly from the best-performing experiment in the research (iteration 9: `reward_mode=jaccard`, `step_cost=0.05`, `action_masking=true`, `gamma=0.99`, hidden layers `[256, 128]`, 200k training steps).
+
+---
+
+## Publishing
+
+### Release process (maintainer)
+
+1. Bump version in `pyproject.toml` and `ddqn_router/__init__.py`
+2. Update `CHANGELOG.md`
+3. Commit: `git commit -am "chore: bump version to X.Y.Z"`
+4. Tag: `git tag vX.Y.Z && git push origin main --tags`
+5. GitHub Actions publishes to PyPI automatically via OIDC trusted publishing
+
+### Local build (for testing before release)
+
+```bash
+pip install build twine
+python -m build
+twine check dist/*
+# Optional: upload to TestPyPI first
+twine upload --repository testpypi dist/*
+```

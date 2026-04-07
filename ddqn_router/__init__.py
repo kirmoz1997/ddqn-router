@@ -2,5 +2,5 @@
 
 from ddqn_router.inference.router import DDQNRouter, RouteResult, RouterNotTrainedError
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = ["DDQNRouter", "RouteResult", "RouterNotTrainedError", "__version__"]
