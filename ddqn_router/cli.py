@@ -126,5 +126,43 @@ def train(
     run_training(cfg)
 
 
+@app.command()
+def serve(
+    artifacts: str = typer.Option(
+        "./artifacts/", "--artifacts", help="Path to trained model artifacts"
+    ),
+    host: str = typer.Option("0.0.0.0", "--host", help="Bind host"),
+    port: int = typer.Option(8000, "--port", help="Bind port"),
+    cors: Optional[str] = typer.Option(
+        None, "--cors", help="Allowed CORS origins (comma-separated, or '*' for all)"
+    ),
+) -> None:
+    """Start a FastAPI server for routing inference.
+
+    Requires the 'serve' extras: pip install ddqn-router[serve]
+    """
+    try:
+        import uvicorn
+    except ImportError:
+        typer.echo(
+            "Error: uvicorn is required. Install with: pip install ddqn-router[serve]",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    from ddqn_router.serve.app import create_app
+
+    cors_origins = None
+    if cors is not None:
+        cors_origins = [o.strip() for o in cors.split(",")]
+
+    application = create_app(artifacts, cors_origins=cors_origins)
+    typer.echo(f"Starting ddqn-router server on {host}:{port}")
+    typer.echo(f"Artifacts: {artifacts}")
+    if cors_origins:
+        typer.echo(f"CORS: {cors_origins}")
+    uvicorn.run(application, host=host, port=port)
+
+
 if __name__ == "__main__":
     app()

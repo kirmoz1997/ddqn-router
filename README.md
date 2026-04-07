@@ -232,6 +232,58 @@ ddqn-router train --config config.yaml [--output-dir ./artifacts/]
 
 Trains the DDQN routing agent. Prints live progress with step count, epsilon, loss, and validation Jaccard.
 
+### `ddqn-router serve`
+
+```
+ddqn-router serve [--artifacts ./artifacts/] [--host 0.0.0.0] [--port 8000] [--cors '*']
+```
+
+Starts a FastAPI server for routing inference. Requires the `serve` extras:
+
+```bash
+pip install ddqn-router[serve]
+```
+
+| Flag | Description | Default |
+|---|---|---|
+| `--artifacts` | Path to trained model artifacts | `./artifacts/` |
+| `--host` | Bind host | `0.0.0.0` |
+| `--port` | Bind port | `8000` |
+| `--cors` | Allowed CORS origins (comma-separated, or `*` for all) | disabled |
+
+**Endpoints:**
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/route` | Route a single query: `{"query": "..."}` |
+| `POST` | `/route/batch` | Route multiple queries: `{"queries": ["...", "..."]}` |
+| `GET` | `/health` | Liveness check |
+| `GET` | `/agents` | List configured agents |
+
+**Example:**
+
+```bash
+ddqn-router serve --artifacts ./artifacts/ --port 8000 --cors '*'
+
+# In another terminal:
+curl -X POST http://localhost:8000/route \
+  -H "Content-Type: application/json" \
+  -d '{"query": "my invoice was charged twice"}'
+
+# Batch:
+curl -X POST http://localhost:8000/route/batch \
+  -H "Content-Type: application/json" \
+  -d '{"queries": ["fix the API bug", "export data to CSV"]}'
+```
+
+You can also use `create_app()` directly for custom deployment (e.g., with Gunicorn):
+
+```python
+from ddqn_router.serve.app import create_app
+
+app = create_app("./artifacts/", cors_origins=["https://myapp.com"])
+```
+
 ---
 
 ## Python API
@@ -359,7 +411,7 @@ At inference, the trained model runs a greedy forward pass in ~1ms, selecting ag
 ```
 ddqn_router/
 ├── __init__.py              # DDQNRouter, RouteResult, RouterNotTrainedError
-├── cli.py                   # Typer CLI (label, dataset, train)
+├── cli.py                   # Typer CLI (label, dataset, train, serve)
 ├── config.py                # Pydantic config schema with all defaults
 ├── agents.py                # AgentRegistry
 ├── labeler/
