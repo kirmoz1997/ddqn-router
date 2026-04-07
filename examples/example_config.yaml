@@ -1,0 +1,84 @@
+# ─────────────────────────────────────────────────────────────
+# ddqn-router configuration
+# ─────────────────────────────────────────────────────────────
+# Define your agents, configure the LLM labeler, and set
+# training hyperparameters. All fields have sensible defaults;
+# override only what you need.
+
+# ── Your agents ──────────────────────────────────────────────
+# Each agent has a unique integer id, a human-readable name,
+# and a description that the LLM labeler uses to decide which
+# agents are needed for a given query.
+
+agents:
+  - id: 0
+    name: "Billing Agent"
+    description: "Handles billing questions, invoices, payment issues, subscription management"
+  - id: 1
+    name: "Technical Agent"
+    description: "Handles technical bugs, errors, integration issues, API questions"
+  - id: 2
+    name: "Account Agent"
+    description: "Handles account settings, profile changes, password resets, permissions"
+  - id: 3
+    name: "Data Agent"
+    description: "Handles data analysis, reports, CSV exports, database queries"
+  - id: 4
+    name: "Onboarding Agent"
+    description: "Handles new user setup, tutorials, getting started guides, walkthroughs"
+
+# ── LLM labeler ─────────────────────────────────────────────
+# The labeler calls any OpenAI-compatible API to label raw
+# queries with the set of agents required to handle them.
+
+labeler:
+  model: "gpt-4o-mini"                      # any OpenAI-compatible model
+  base_url: "https://api.openai.com/v1"     # swap for Ollama, DeepSeek, etc.
+  # api_key: ""                              # or set DDQN_ROUTER_API_KEY env var
+  input: "./data/raw_texts.txt"
+  output: "./data/tasks.jsonl"
+  min_agents: 2                              # at least this many agents per example
+  # max_agents: null                         # null = no upper limit
+  # prompt_template: null                    # null = built-in recall-biased prompt
+  prompt_version: "v1"
+  batch_size: 1
+  cache: "./cache/label_cache.jsonl"
+  fallback_strategy: "keyword"               # "skip" | "keyword" | "all-agents"
+
+# ── Dataset ──────────────────────────────────────────────────
+
+dataset:
+  input: "./data/tasks.jsonl"
+  train_ratio: 0.7
+  val_ratio: 0.15
+  test_ratio: 0.15
+  output_dir: "./data/"
+
+# ── Training ─────────────────────────────────────────────────
+# Defaults are from the best-performing research experiment.
+# You rarely need to change these for a new set of agents.
+
+training:
+  total_steps: 200000
+  batch_size: 64
+  learning_rate: 0.001
+  gamma: 0.99
+  epsilon_start: 1.0
+  epsilon_end: 0.05
+  epsilon_decay_steps: 100000
+  target_update_freq: 500
+  replay_buffer_size: 50000
+  min_replay_size: 1000
+  reward_mode: "jaccard"
+  step_cost: 0.05
+  hidden_layers: [256, 128]
+  tfidf_max_features: 5000
+  action_masking: true
+  seed: 42
+  val_eval_freq: 5000
+  save_best: true
+  max_steps_per_episode: 20
+
+# ── Output ───────────────────────────────────────────────────
+
+output_dir: "./artifacts/"
