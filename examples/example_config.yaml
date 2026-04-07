@@ -1,0 +1,67 @@
+# ddqn-router configuration
+# All fields shown with defaults — override only what you need.
+
+agents:
+  - id: 0
+    name: "Billing Agent"
+    description: "Handles billing questions, invoices, payment issues, subscription management"
+  - id: 1
+    name: "Technical Agent"
+    description: "Handles technical bugs, errors, integration issues, API questions"
+  - id: 2
+    name: "Account Agent"
+    description: "Handles account settings, profile changes, password resets, permissions"
+  - id: 3
+    name: "Data Agent"
+    description: "Handles data analysis, reports, CSV exports, database queries"
+  - id: 4
+    name: "Onboarding Agent"
+    description: "Handles new user setup, tutorials, getting started guides, walkthroughs"
+
+# Training hyperparameters (defaults from research iteration 9)
+training:
+  total_steps: 200000         # Total training steps
+  batch_size: 64              # Replay batch size
+  learning_rate: 0.001        # Adam learning rate
+  gamma: 0.99                 # Discount factor
+  epsilon_start: 1.0          # Initial exploration rate
+  epsilon_end: 0.05           # Final exploration rate
+  epsilon_decay_steps: 100000 # Steps over which epsilon decays
+  target_update_freq: 500     # Steps between target network syncs
+  replay_buffer_size: 50000   # Max transitions in replay buffer
+  min_replay_size: 1000       # Min buffer size before training starts
+  reward_mode: "jaccard"      # "jaccard" or "stochastic"
+  step_cost: 0.05             # Penalty per agent selection (jaccard mode)
+  hidden_layers: [256, 128]   # Q-network hidden layer sizes
+  tfidf_max_features: 5000    # TF-IDF vocabulary size
+  action_masking: true        # Mask already-selected agents in Q-values
+  seed: 42                    # Random seed for reproducibility
+  val_eval_freq: 5000         # Steps between validation evaluations
+  save_best: true             # Save best checkpoint by val Jaccard
+  max_steps_per_episode: 20   # Max steps before forced episode termination
+
+# Labeler settings (for LLM-based dataset labeling)
+labeler:
+  model: "gpt-4o-mini"
+  base_url: "https://api.openai.com/v1"
+  # api_key: set via DDQN_ROUTER_API_KEY env var or --api-key flag
+  input: "./data/raw_texts.txt"
+  output: "./data/tasks.jsonl"
+  min_agents: 2
+  # max_agents: null           # null = no upper limit
+  # prompt_template: null      # null = use built-in recall-biased prompt
+  prompt_version: "v1"
+  batch_size: 1
+  cache: "./cache/label_cache.jsonl"
+  fallback_strategy: "keyword" # "skip", "keyword", or "all-agents"
+
+# Dataset split settings
+dataset:
+  input: "./data/tasks.jsonl"
+  train_ratio: 0.7
+  val_ratio: 0.15
+  test_ratio: 0.15
+  output_dir: "./data/"
+
+# Where to save trained artifacts
+output_dir: "./artifacts/"

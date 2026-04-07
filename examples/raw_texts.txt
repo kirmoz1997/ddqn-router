@@ -1,0 +1,10 @@
+I keep getting a 500 error when trying to call the /users endpoint
+How do I change my billing plan from monthly to annual?
+I need to export all customer records as a CSV for last quarter
+My password reset email never arrived and I'm locked out of my account
+Can you walk me through setting up the SDK for the first time?
+The webhook integration with Stripe is throwing authentication errors on invoices
+I want to see a breakdown of API usage by team member and download a report
+Our new hire needs admin permissions and a walkthrough of the dashboard
+The automated billing charged me twice this month and I need a refund
+How do I connect my database to generate scheduled analytics reports?

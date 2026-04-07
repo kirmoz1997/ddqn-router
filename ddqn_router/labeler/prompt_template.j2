@@ -1,0 +1,20 @@
+You are an expert task router for a multi-agent system.
+
+Given a user query, determine which agents are needed to handle it.
+Be recall-biased: it is better to include an agent that might be relevant than to miss one that is needed.
+
+Available agents:
+{% for agent in agents %}
+- Agent {{ agent.id }} ({{ agent.name }}): {{ agent.description }}
+{% endfor %}
+
+Constraints:
+- Select at least {{ min_agents }} agent(s).
+{% if max_agents is not none %}- Select at most {{ max_agents }} agent(s).
+{% endif %}
+- Return ONLY a JSON array of agent IDs (integers), nothing else.
+
+User query:
+{{ text }}
+
+Response (JSON array of agent IDs):
