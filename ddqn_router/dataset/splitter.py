@@ -16,9 +16,10 @@ def stratified_split(
     test_ratio: float = 0.15,
     seed: int = 42,
 ) -> tuple[list[Task], list[Task], list[Task]]:
-    assert abs(train_ratio + val_ratio + test_ratio - 1.0) < 1e-6, (
-        "Ratios must sum to 1.0"
-    )
+    if abs(train_ratio + val_ratio + test_ratio - 1.0) > 1e-6:
+        raise ValueError(
+            f"Ratios must sum to 1.0, got {train_ratio + val_ratio + test_ratio:.4f}"
+        )
 
     rng = random.Random(seed)
     buckets: dict[int, list[Task]] = defaultdict(list)
@@ -33,11 +34,10 @@ def stratified_split(
         rng.shuffle(bucket)
         n = len(bucket)
         n_train = max(1, round(n * train_ratio))
-        n_val = max(1, round(n * val_ratio)) if n > 2 else 0
-        # Ensure at least one test sample when possible
-        if n > 2:
-            n_test = n - n_train - n_val
-        else:
+        n_val = max(0, round(n * val_ratio))
+        n_test = max(0, n - n_train - n_val)
+
+        if n <= 2:
             n_val = 0
             n_test = n - n_train
 

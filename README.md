@@ -4,14 +4,87 @@ A lightweight Python library that trains a Double DQN agent to route user querie
 
 You define your agents, label a dataset with an LLM, train the router, and get a fast inference model that selects the right combination of agents for any input query — no LLM needed at inference time.
 
-## Why ddqn-router?
+---
 
-| Problem | Solution |
-|---|---|
-| LLM-based routing is slow and expensive at scale | DDQN inference is a single forward pass (~1ms) |
-| Hard-coded rules break when agents change | Train a new router in minutes on your own data |
-| Most routers pick *one* agent | ddqn-router selects *subsets* (multi-agent routing) |
-| Need a PhD in RL to set it up | Config-driven, CLI-first, sensible defaults from published research |
+## Why DDQN Routing?
+
+Most multi-agent systems route queries using one of three approaches: hard-coded rules, a classifier, or an LLM call. Each has serious drawbacks at scale. DDQN routing addresses all of them.
+
+### Cost
+
+LLM-based routing costs money on every request. Even a cheap model like `gpt-4o-mini` at $0.15/1M input tokens adds up: 1M routing decisions per month costs ~$150 in API calls alone (assuming ~1000 tokens per routing prompt). A DDQN router runs locally for $0 after training — the model is a ~300KB PyTorch file doing matrix multiplications on CPU.
+
+For comparison, training the DDQN itself requires labeling a dataset (~500-2000 examples) with a single LLM pass. That one-time cost is typically $0.50-$5.00 total. The router then serves unlimited requests at zero marginal cost.
+
+### Speed
+
+| Method | Latency per query | Where it runs |
+|---|---|---|
+| LLM routing (GPT-4o-mini) | 300-800ms | Remote API |
+| LLM routing (local Ollama) | 50-200ms | Local GPU |
+| Classifier (TF-IDF + LogReg) | ~1ms | CPU |
+| **DDQN router** | **~1ms** | **CPU** |
+
+DDQN inference is a sequence of small MLP forward passes (one per routing step, typically 2-4 steps). Each forward pass processes a vector of a few thousand floats through two hidden layers — this takes microseconds on any modern CPU. Total end-to-end latency including TF-IDF encoding is under 1ms.
+
+This is 300-800x faster than an LLM API call, and it scales linearly with request volume without any rate limits, API keys, or network dependency.
+
+### Quality
+
+In the [research](https://github.com/kirmoz1997/dqn_routing_research) that this library is based on, DDQN routing was benchmarked against four alternatives on a multi-agent customer support system with 10 agents:
+
+| Method | Jaccard | F1 | Success Rate |
+|---|---|---|---|
+| Random | 0.153 | 0.221 | 0.060 |
+| Rule-based (keyword) | 0.287 | 0.369 | 0.120 |
+| Supervised (TF-IDF + LogReg) | 0.512 | 0.621 | 0.340 |
+| LLM (GPT-4o-mini) | 0.589 | 0.685 | 0.410 |
+| **DDQN (this library)** | **0.631** | **0.732** | **0.470** |
+
+Key observations from the research:
+- DDQN outperformed the LLM baseline by +4.2pp Jaccard and +4.7pp F1, while being 300x+ faster and free at inference time.
+- Action masking was critical — it prevents the model from re-selecting agents it already picked, reducing wasted exploration and improving convergence speed by ~40%.
+- The Jaccard-based reward with step cost (0.05 penalty per selection) produced the best balance between precision and recall. Without step cost, the model tends to over-select agents.
+- The model learns a genuine multi-step policy: it considers the agents it has already selected before deciding the next one, rather than making independent per-agent decisions like a classifier.
+
+### Why Double DQN specifically?
+
+Standard DQN suffers from Q-value overestimation — it uses the same network to both select and evaluate actions, which creates a positive bias. Double DQN (van Hasselt et al., 2016) fixes this by using the online network to select the best action, but the target network to evaluate its value. In routing tasks where the reward signal is sparse (only at episode end), this correction is particularly important because overestimated Q-values can cause the agent to stop too early or too late.
+
+---
+
+## When To Use ddqn-router
+
+### Good fit
+
+- **You have a multi-agent system with 3+ specialized agents** and need to route incoming queries to one or more of them.
+- **You need subset routing** — a single query may require multiple agents working together (e.g., a billing issue that also needs account verification).
+- **You have enough data to label** — 500+ representative queries is a practical minimum; 2000+ is ideal. The labeling is done once via LLM.
+- **You want fast, free inference** — after training, routing is a local forward pass with no API calls.
+- **Your query distribution is relatively stable** — the TF-IDF encoder works best when the vocabulary and topics don't change dramatically after training.
+- **You want reproducibility and explainability** — `router.explain()` shows exactly which agents the model considered and why, step by step.
+
+### Not a good fit
+
+- **You have fewer than ~300 labeled examples.** The DDQN needs enough data to learn the reward structure. With very small datasets, a simple keyword matcher or direct LLM call will work better.
+- **You only need single-agent routing** (each query goes to exactly one agent). A standard multi-class classifier is simpler and equally effective for this case.
+- **Your agent set changes frequently** (weekly or more). Each change requires retraining. If you add/remove agents often, an LLM-based router that reads agent descriptions dynamically may be more practical.
+- **You need zero-shot generalization** to completely new query types not represented in training data. DDQN generalizes within the distribution it was trained on; for truly novel inputs, an LLM has broader coverage.
+- **Your routing depends on conversation history or user context**, not just the current query text. This library routes based on single query text only (TF-IDF features). If you need multi-turn context, you'd need to extend the state representation.
+
+### Comparison summary
+
+| Criterion | DDQN Router | LLM Router | Classifier |
+|---|---|---|---|
+| Inference cost | Free | $0.15+ / 1M queries | Free |
+| Latency | ~1ms | 300-800ms | ~1ms |
+| Subset routing (multi-agent) | Native | Via prompting | Via multi-label |
+| Handles new agent types | Retrain needed | Zero-shot | Retrain needed |
+| Explainability | Q-value table per step | Token log-probs (limited) | Feature weights |
+| Min dataset size | ~500 examples | 0 (zero-shot) | ~200 examples |
+| Quality on trained distribution | High | High | Medium |
+
+---
 
 ## Quickstart
 
@@ -64,6 +137,8 @@ The labeler calls any OpenAI-compatible API (OpenAI, DeepSeek, Ollama, etc.) and
 ```json
 {"id": "ex_a1b2c3d4", "text": "...", "required_agents": [0, 2]}
 ```
+
+You can also create this file manually or with your own labeling pipeline — just follow the same JSONL format.
 
 ### 4. Split and train
 
@@ -167,7 +242,7 @@ from ddqn_router import DDQNRouter, RouteResult, RouterNotTrainedError
 
 ### `DDQNRouter.load(artifacts_path) -> DDQNRouter`
 
-Load a trained router. Raises `RouterNotTrainedError` with setup instructions if artifacts are missing.
+Load a trained router. Raises `RouterNotTrainedError` with step-by-step setup instructions if artifacts are missing.
 
 ### `router.route(query) -> RouteResult`
 
@@ -198,7 +273,7 @@ Returns the list of configured agents with `id`, `name`, and `description`.
 
 ## Configuration Reference
 
-All parameters live in a single YAML file. Defaults come from the best research configuration and work well out of the box.
+All parameters live in a single YAML file. Defaults come from the best research configuration and work well out of the box — you typically only need to define your agents.
 
 ### Agents
 
