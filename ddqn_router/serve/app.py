@@ -54,10 +54,4 @@ def health() -> dict:
 @app.get("/agents")
 def agents() -> dict:
     assert _router is not None, "Router not loaded. Call create_app() first."
-    agent_list = _router._registry.all_agents()
-    return {
-        "agents": [
-            {"id": a.id, "name": a.name, "description": a.description}
-            for a in agent_list
-        ]
-    }
+    return {"agents": _router.agents}

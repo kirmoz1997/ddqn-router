@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 from typing import Optional
@@ -17,8 +16,6 @@ app = typer.Typer(
 dataset_app = typer.Typer(help="Dataset utilities.", no_args_is_help=True)
 app.add_typer(dataset_app, name="dataset")
 
-
-# ── label ──────────────────────────────────────────────────────────────────────
 
 @app.command()
 def label(
@@ -74,15 +71,13 @@ def label(
     registry = AgentRegistry(cfg.agents)
     labeler = LLMLabeler(cfg.labeler, registry)
 
-    typer.echo(f"Labeling {cfg.labeler.input} → {cfg.labeler.output}")
+    typer.echo(f"Labeling {cfg.labeler.input} -> {cfg.labeler.output}")
     try:
         count = labeler.label_file(cfg.labeler.input, cfg.labeler.output)
     finally:
         labeler.close()
-    typer.echo(f"Labeled {count} examples → {cfg.labeler.output}")
+    typer.echo(f"Labeled {count} examples -> {cfg.labeler.output}")
 
-
-# ── dataset ────────────────────────────────────────────────────────────────────
 
 @dataset_app.command("stats")
 def dataset_stats(
@@ -111,11 +106,9 @@ def dataset_split(
     tasks = load_tasks(input)
     out = output_dir or str(Path(input).parent)
     n_train, n_val, n_test = split_and_save(tasks, out, train, val, test, seed)
-    typer.echo(f"Split {len(tasks)} examples → train={n_train}, val={n_val}, test={n_test}")
+    typer.echo(f"Split {len(tasks)} examples -> train={n_train}, val={n_val}, test={n_test}")
     typer.echo(f"Saved to {out}/")
 
-
-# ── train ──────────────────────────────────────────────────────────────────────
 
 @app.command()
 def train(
@@ -131,89 +124,6 @@ def train(
         cfg.output_dir = output_dir
 
     run_training(cfg)
-
-
-# ── baseline ───────────────────────────────────────────────────────────────────
-
-@app.command()
-def baseline(
-    config: str = typer.Option(..., "--config", help="Path to router_config.yaml"),
-    output_dir: Optional[str] = typer.Option(None, "--output-dir", help="Artifacts output dir"),
-    skip_llm: bool = typer.Option(False, "--skip-llm", help="Skip LLM baseline"),
-) -> None:
-    """Run all baselines on the test split and print a comparison table."""
-    from ddqn_router.agents import AgentRegistry
-    from ddqn_router.baselines.random_router import random_route
-    from ddqn_router.baselines.rule_router import rule_route
-    from ddqn_router.baselines.supervised_router import SupervisedRouter
-    from ddqn_router.config import RouterConfig
-    from ddqn_router.dataset.dataset import load_tasks
-    from ddqn_router.eval.evaluator import evaluate_routing
-
-    cfg = RouterConfig.from_yaml(config)
-    if output_dir is not None:
-        cfg.output_dir = output_dir
-
-    out_path = Path(cfg.output_dir)
-    out_path.mkdir(parents=True, exist_ok=True)
-
-    registry = AgentRegistry(cfg.agents)
-    data_dir = Path(cfg.dataset.input).parent
-    train_tasks = load_tasks(data_dir / "train.jsonl")
-    test_tasks = load_tasks(data_dir / "test.jsonl")
-    test_targets = [set(t["required_agents"]) for t in test_tasks]
-
-    results: dict[str, dict] = {}
-
-    # Random
-    preds = random_route(test_tasks, registry, cfg.training.seed)
-    results["Random"] = evaluate_routing(preds, test_targets)
-
-    # Rule-based
-    preds = rule_route(test_tasks, registry)
-    results["Rule-based"] = evaluate_routing(preds, test_targets)
-
-    # Supervised
-    sup = SupervisedRouter(registry, cfg.training.tfidf_max_features)
-    sup.fit(train_tasks)
-    sup.save(out_path / "supervised.joblib")
-    preds = sup.predict(test_tasks)
-    results["Supervised"] = evaluate_routing(preds, test_targets)
-
-    # LLM (optional)
-    if not skip_llm and cfg.labeler.api_key:
-        from ddqn_router.baselines.llm_router import llm_route
-
-        preds = llm_route(test_tasks, registry, cfg.labeler)
-        results["LLM Router"] = evaluate_routing(preds, test_targets)
-
-    # Print comparison table
-    _print_comparison(results)
-
-    with open(out_path / "baselines_summary.json", "w") as f:
-        json.dump(results, f, indent=2)
-    typer.echo(f"\nSaved to {out_path / 'baselines_summary.json'}")
-
-
-def _print_comparison(results: dict[str, dict]) -> None:
-    metrics_keys = [
-        "mean_jaccard", "success_rate", "exact_match_rate",
-        "mean_precision", "mean_recall", "mean_f1",
-    ]
-    headers = ["Method"] + [k.replace("mean_", "").replace("_", " ").title() for k in metrics_keys]
-    col_w = [16] + [12] * len(metrics_keys)
-
-    print(f"\n  Baseline Comparison")
-    print(f"  {'─' * (sum(col_w) + len(col_w) * 2)}")
-    header_row = "  ".join(h.ljust(w) for h, w in zip(headers, col_w))
-    print(f"  {header_row}")
-    print(f"  {'─' * (sum(col_w) + len(col_w) * 2)}")
-
-    for name, metrics in results.items():
-        vals = [name] + [f"{metrics.get(k, 0):.4f}" for k in metrics_keys]
-        row = "  ".join(v.ljust(w) for v, w in zip(vals, col_w))
-        print(f"  {row}")
-    print()
 
 
 if __name__ == "__main__":
