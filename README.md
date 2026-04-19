@@ -18,12 +18,14 @@ For comparison, training the DDQN itself requires labeling a dataset (~500-2000 
 
 ### Speed
 
-| Method | Latency per query | Where it runs |
-|---|---|---|
-| LLM routing (GPT-4o-mini) | 300-800ms | Remote API |
-| LLM routing (local Ollama) | 50-200ms | Local GPU |
-| Classifier (TF-IDF + LogReg) | ~1ms | CPU |
-| **DDQN router** | **~1ms** | **CPU** |
+
+| Method                       | Latency per query | Where it runs |
+| ---------------------------- | ----------------- | ------------- |
+| LLM routing (GPT-4o-mini)    | 300-800ms         | Remote API    |
+| LLM routing (local Ollama)   | 50-200ms          | Local GPU     |
+| Classifier (TF-IDF + LogReg) | ~1ms              | CPU           |
+| **DDQN router**              | **~1ms**          | **CPU**       |
+
 
 DDQN inference is a sequence of small MLP forward passes (one per routing step, typically 2-4 steps). Each forward pass processes a vector of a few thousand floats through two hidden layers — this takes microseconds on any modern CPU. Total end-to-end latency including TF-IDF encoding is under 1ms.
 
@@ -33,15 +35,18 @@ This is 300-800x faster than an LLM API call, and it scales linearly with reques
 
 In the [research](https://github.com/kirmoz1997/dqn_routing_research) that this library is based on, DDQN routing was benchmarked against four alternatives on a multi-agent customer support system with 10 agents:
 
-| Method | Jaccard | F1 | Success Rate |
-|---|---|---|---|
-| Random | 0.153 | 0.221 | 0.060 |
-| Rule-based (keyword) | 0.287 | 0.369 | 0.120 |
-| Supervised (TF-IDF + LogReg) | 0.512 | 0.621 | 0.340 |
-| LLM (GPT-4o-mini) | 0.589 | 0.685 | 0.410 |
-| **DDQN (this library)** | **0.631** | **0.732** | **0.470** |
+
+| Method                       | Jaccard   | F1        | Success Rate |
+| ---------------------------- | --------- | --------- | ------------ |
+| Random                       | 0.153     | 0.221     | 0.060        |
+| Rule-based (keyword)         | 0.287     | 0.369     | 0.120        |
+| Supervised (TF-IDF + LogReg) | 0.512     | 0.621     | 0.340        |
+| LLM (GPT-4o-mini)            | 0.589     | 0.685     | 0.410        |
+| **DDQN (this library)**      | **0.631** | **0.732** | **0.470**    |
+
 
 Key observations from the research:
+
 - DDQN outperformed the LLM baseline by +4.2pp Jaccard and +4.7pp F1, while being 300x+ faster and free at inference time.
 - Action masking was critical — it prevents the model from re-selecting agents it already picked, reducing wasted exploration and improving convergence speed by ~40%.
 - The Jaccard-based reward with step cost (0.05 penalty per selection) produced the best balance between precision and recall. Without step cost, the model tends to over-select agents.
@@ -74,15 +79,17 @@ Standard DQN suffers from Q-value overestimation — it uses the same network to
 
 ### Comparison summary
 
-| Criterion | DDQN Router | LLM Router | Classifier |
-|---|---|---|---|
-| Inference cost | Free | $0.15+ / 1M queries | Free |
-| Latency | ~1ms | 300-800ms | ~1ms |
-| Subset routing (multi-agent) | Native | Via prompting | Via multi-label |
-| Handles new agent types | Retrain needed | Zero-shot | Retrain needed |
-| Explainability | Q-value table per step | Token log-probs (limited) | Feature weights |
-| Min dataset size | ~500 examples | 0 (zero-shot) | ~200 examples |
-| Quality on trained distribution | High | High | Medium |
+
+| Criterion                       | DDQN Router            | LLM Router                | Classifier      |
+| ------------------------------- | ---------------------- | ------------------------- | --------------- |
+| Inference cost                  | Free                   | $0.15+ / 1M queries       | Free            |
+| Latency                         | ~1ms                   | 300-800ms                 | ~1ms            |
+| Subset routing (multi-agent)    | Native                 | Via prompting             | Via multi-label |
+| Handles new agent types         | Retrain needed         | Zero-shot                 | Retrain needed  |
+| Explainability                  | Q-value table per step | Token log-probs (limited) | Feature weights |
+| Min dataset size                | ~500 examples          | 0 (zero-shot)             | ~200 examples   |
+| Quality on trained distribution | High                   | High                      | Medium          |
+
 
 ---
 
@@ -165,14 +172,16 @@ ddqn-router train --config config.yaml
 
 Training outputs are saved to `./artifacts/`:
 
-| File | Content |
-|---|---|
-| `model.pt` | Trained Q-network weights |
-| `encoder.joblib` | Fitted TF-IDF encoder |
-| `config_used.json` | Exact config snapshot for reproducibility |
-| `metrics_val_best.json` | Best validation metrics |
-| `metrics_test.json` | Final test set metrics |
-| `training_log.jsonl` | Step-by-step training log |
+
+| File                    | Content                                   |
+| ----------------------- | ----------------------------------------- |
+| `model.pt`              | Trained Q-network weights                 |
+| `encoder.joblib`        | Fitted TF-IDF encoder                     |
+| `config_used.json`      | Exact config snapshot for reproducibility |
+| `metrics_val_best.json` | Best validation metrics                   |
+| `metrics_test.json`     | Final test set metrics                    |
+| `training_log.jsonl`    | Step-by-step training log                 |
+
 
 ### 5. Use the router
 
@@ -206,20 +215,22 @@ Label raw queries with required agents using an LLM.
 ddqn-router label --config CONFIG [OPTIONS]
 ```
 
-| Flag | Description | Default |
-|---|---|---|
-| `--config` | Path to YAML config (required) | — |
-| `--input` | Path to raw texts file | from config |
-| `--output` | Output tasks.jsonl path | `./data/tasks.jsonl` |
-| `--model` | LLM model string | `gpt-4o-mini` |
-| `--base-url` | API base URL | `https://api.openai.com/v1` |
-| `--api-key` | API key (or `DDQN_ROUTER_API_KEY` env var) | — |
-| `--min-agents` | Min agents per example | `2` |
-| `--max-agents` | Max agents per example | all |
-| `--prompt-template` | Custom Jinja2 prompt file | built-in |
-| `--batch-size` | Examples per API call | `1` |
-| `--cache` | Cache file path | `./cache/label_cache.jsonl` |
-| `--fallback-strategy` | On LLM parse failure: `skip` / `keyword` / `all-agents` | `keyword` |
+
+| Flag                  | Description                                             | Default                     |
+| --------------------- | ------------------------------------------------------- | --------------------------- |
+| `--config`            | Path to YAML config (required)                          | —                           |
+| `--input`             | Path to raw texts file                                  | from config                 |
+| `--output`            | Output tasks.jsonl path                                 | `./data/tasks.jsonl`        |
+| `--model`             | LLM model string                                        | `gpt-4o-mini`               |
+| `--base-url`          | API base URL                                            | `https://api.openai.com/v1` |
+| `--api-key`           | API key (or `DDQN_ROUTER_API_KEY` env var)              | —                           |
+| `--min-agents`        | Min agents per example                                  | `2`                         |
+| `--max-agents`        | Max agents per example                                  | all                         |
+| `--prompt-template`   | Custom Jinja2 prompt file                               | built-in                    |
+| `--batch-size`        | Examples per API call                                   | `1`                         |
+| `--cache`             | Cache file path                                         | `./cache/label_cache.jsonl` |
+| `--fallback-strategy` | On LLM parse failure: `skip` / `keyword` / `all-agents` | `keyword`                   |
+
 
 The labeler uses raw `httpx` — no OpenAI SDK required. Any provider that exposes `POST /chat/completions` works: OpenAI, Azure, DeepSeek, Anthropic via proxy, local Ollama, vLLM, etc.
 
@@ -260,21 +271,25 @@ Starts a FastAPI server for routing inference. Requires the `serve` extras:
 pip install ddqn-router[serve]
 ```
 
-| Flag | Description | Default |
-|---|---|---|
-| `--artifacts` | Path to trained model artifacts | `./artifacts/` |
-| `--host` | Bind host | `0.0.0.0` |
-| `--port` | Bind port | `8000` |
-| `--cors` | Allowed CORS origins (comma-separated, or `*` for all) | disabled |
+
+| Flag          | Description                                            | Default        |
+| ------------- | ------------------------------------------------------ | -------------- |
+| `--artifacts` | Path to trained model artifacts                        | `./artifacts/` |
+| `--host`      | Bind host                                              | `0.0.0.0`      |
+| `--port`      | Bind port                                              | `8000`         |
+| `--cors`      | Allowed CORS origins (comma-separated, or `*` for all) | disabled       |
+
 
 **Endpoints:**
 
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/route` | Route a single query: `{"query": "..."}` |
+
+| Method | Path           | Description                                           |
+| ------ | -------------- | ----------------------------------------------------- |
+| `POST` | `/route`       | Route a single query: `{"query": "..."}`              |
 | `POST` | `/route/batch` | Route multiple queries: `{"queries": ["...", "..."]}` |
-| `GET` | `/health` | Liveness check |
-| `GET` | `/agents` | List configured agents |
+| `GET`  | `/health`      | Liveness check                                        |
+| `GET`  | `/agents`      | List configured agents                                |
+
 
 **Example:**
 
@@ -345,68 +360,78 @@ All parameters live in a single YAML file. Defaults come from the best research 
 
 ### Agents
 
-| Field | Type | Description |
-|---|---|---|
-| `agents[].id` | int | Unique agent ID (0-indexed) |
-| `agents[].name` | str | Human-readable name |
-| `agents[].description` | str | What this agent handles (used by labeler and TF-IDF) |
+
+| Field                  | Type | Description                                          |
+| ---------------------- | ---- | ---------------------------------------------------- |
+| `agents[].id`          | int  | Unique agent ID (0-indexed)                          |
+| `agents[].name`        | str  | Human-readable name                                  |
+| `agents[].description` | str  | What this agent handles (used by labeler and TF-IDF) |
+
 
 ### Labeler
 
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `labeler.model` | str | `gpt-4o-mini` | LLM model string |
-| `labeler.base_url` | str | `https://api.openai.com/v1` | API base URL |
-| `labeler.api_key` | str | `""` | API key (prefer `DDQN_ROUTER_API_KEY` env var) |
-| `labeler.input` | str | `""` | Path to raw texts |
-| `labeler.output` | str | `./data/tasks.jsonl` | Output labeled dataset |
-| `labeler.min_agents` | int | `2` | Min agents per example |
-| `labeler.max_agents` | int\|null | `null` | Max agents (null = no limit) |
-| `labeler.prompt_template` | str\|null | `null` | Custom Jinja2 prompt path |
-| `labeler.prompt_version` | str | `v1` | Version tag for cache invalidation |
-| `labeler.batch_size` | int | `1` | Examples per API call |
-| `labeler.cache` | str | `./cache/label_cache.jsonl` | Cache file path |
-| `labeler.fallback_strategy` | str | `keyword` | Fallback on LLM parse failure |
+
+| Field                       | Type | Default                     | Description                                    |
+| --------------------------- | ---- | --------------------------- | ---------------------------------------------- |
+| `labeler.model`             | str  | `gpt-4o-mini`               | LLM model string                               |
+| `labeler.base_url`          | str  | `https://api.openai.com/v1` | API base URL                                   |
+| `labeler.api_key`           | str  | `""`                        | API key (prefer `DDQN_ROUTER_API_KEY` env var) |
+| `labeler.input`             | str  | `""`                        | Path to raw texts                              |
+| `labeler.output`            | str  | `./data/tasks.jsonl`        | Output labeled dataset                         |
+| `labeler.min_agents`        | int  | `2`                         | Min agents per example                         |
+| `labeler.max_agents`        | int or null | `null`                 | Max agents (`null` = no limit)                 |
+| `labeler.prompt_template`   | str or null | `null`                 | Custom Jinja2 prompt path                      |
+| `labeler.prompt_version`    | str  | `v1`                        | Version tag for cache invalidation             |
+| `labeler.batch_size`        | int  | `1`                         | Examples per API call                          |
+| `labeler.cache`             | str  | `./cache/label_cache.jsonl` | Cache file path                                |
+| `labeler.fallback_strategy` | str  | `keyword`                   | Fallback on LLM parse failure                  |
+
 
 ### Dataset
 
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `dataset.input` | str | `./data/tasks.jsonl` | Path to labeled dataset |
-| `dataset.train_ratio` | float | `0.7` | Train split ratio |
-| `dataset.val_ratio` | float | `0.15` | Validation split ratio |
-| `dataset.test_ratio` | float | `0.15` | Test split ratio |
-| `dataset.output_dir` | str | `./data/` | Where to save split files |
+
+| Field                 | Type  | Default              | Description               |
+| --------------------- | ----- | -------------------- | ------------------------- |
+| `dataset.input`       | str   | `./data/tasks.jsonl` | Path to labeled dataset   |
+| `dataset.train_ratio` | float | `0.7`                | Train split ratio         |
+| `dataset.val_ratio`   | float | `0.15`               | Validation split ratio    |
+| `dataset.test_ratio`  | float | `0.15`               | Test split ratio          |
+| `dataset.output_dir`  | str   | `./data/`            | Where to save split files |
+
 
 ### Training
 
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `training.total_steps` | int | `200000` | Total training steps |
-| `training.batch_size` | int | `64` | Replay sample batch size |
-| `training.learning_rate` | float | `0.001` | Adam optimizer learning rate |
-| `training.gamma` | float | `0.99` | Discount factor |
-| `training.epsilon_start` | float | `1.0` | Initial exploration rate |
-| `training.epsilon_end` | float | `0.05` | Final exploration rate |
-| `training.epsilon_decay_steps` | int | `100000` | Steps over which epsilon decays |
-| `training.target_update_freq` | int | `500` | Steps between target network syncs |
-| `training.replay_buffer_size` | int | `50000` | Replay buffer capacity |
-| `training.min_replay_size` | int | `1000` | Min buffer fill before training starts |
-| `training.reward_mode` | str | `jaccard` | `"jaccard"` or `"stochastic"` |
-| `training.step_cost` | float | `0.05` | Per-agent selection penalty |
-| `training.hidden_layers` | list[int] | `[256, 128]` | Q-network hidden layer sizes |
-| `training.tfidf_max_features` | int | `5000` | TF-IDF vocabulary limit |
-| `training.action_masking` | bool | `true` | Mask already-selected agents |
-| `training.seed` | int | `42` | Random seed for reproducibility |
-| `training.val_eval_freq` | int | `5000` | Steps between validation evaluations |
-| `training.save_best` | bool | `true` | Save best checkpoint by val Jaccard |
-| `training.max_steps_per_episode` | int | `20` | Max routing steps per episode |
+
+| Field                            | Type      | Default      | Description                            |
+| -------------------------------- | --------- | ------------ | -------------------------------------- |
+| `training.total_steps`           | int       | `200000`     | Total training steps                   |
+| `training.batch_size`            | int       | `64`         | Replay sample batch size               |
+| `training.learning_rate`         | float     | `0.001`      | Adam optimizer learning rate           |
+| `training.gamma`                 | float     | `0.99`       | Discount factor                        |
+| `training.epsilon_start`         | float     | `1.0`        | Initial exploration rate               |
+| `training.epsilon_end`           | float     | `0.05`       | Final exploration rate                 |
+| `training.epsilon_decay_steps`   | int       | `100000`     | Steps over which epsilon decays        |
+| `training.target_update_freq`    | int       | `500`        | Steps between target network syncs     |
+| `training.replay_buffer_size`    | int       | `50000`      | Replay buffer capacity                 |
+| `training.min_replay_size`       | int       | `1000`       | Min buffer fill before training starts |
+| `training.reward_mode`           | str       | `jaccard`    | `"jaccard"` or `"stochastic"`          |
+| `training.step_cost`             | float     | `0.05`       | Per-agent selection penalty            |
+| `training.hidden_layers`         | list[int] | `[256, 128]` | Q-network hidden layer sizes           |
+| `training.tfidf_max_features`    | int       | `5000`       | TF-IDF vocabulary limit                |
+| `training.action_masking`        | bool      | `true`       | Mask already-selected agents           |
+| `training.seed`                  | int       | `42`         | Random seed for reproducibility        |
+| `training.val_eval_freq`         | int       | `5000`       | Steps between validation evaluations   |
+| `training.save_best`             | bool      | `true`       | Save best checkpoint by val Jaccard    |
+| `training.max_steps_per_episode` | int       | `20`         | Max routing steps per episode          |
+
 
 ### Output
 
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `output_dir` | str | `./artifacts/` | Where to save trained model artifacts |
+
+| Field        | Type | Default        | Description                           |
+| ------------ | ---- | -------------- | ------------------------------------- |
+| `output_dir` | str  | `./artifacts/` | Where to save trained model artifacts |
+
 
 ---
 
@@ -480,3 +505,4 @@ twine check dist/*
 # Optional: upload to TestPyPI first
 twine upload --repository testpypi dist/*
 ```
+
