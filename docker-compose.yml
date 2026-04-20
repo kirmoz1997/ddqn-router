@@ -1,0 +1,18 @@
+version: "3.9"
+
+services:
+  router:
+    image: ghcr.io/kirmoz1997/ddqn-router:latest
+    build:
+      context: .
+    container_name: ddqn-router
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./artifacts:/artifacts:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

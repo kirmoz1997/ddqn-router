@@ -1,0 +1,41 @@
+agents:
+  - id: 0
+    name: "Hardware"
+    description: "laptop monitor keyboard mouse printer peripheral device"
+  - id: 1
+    name: "Network"
+    description: "vpn wifi internet connectivity dns proxy firewall"
+  - id: 2
+    name: "Access"
+    description: "password sso mfa account login permission unlock"
+  - id: 3
+    name: "Software"
+    description: "application install update license crash office bug"
+  - id: 4
+    name: "Security"
+    description: "phishing suspicious link malware antivirus compromise breach"
+
+labeler:
+  model: "gpt-4o-mini"
+  base_url: "https://api.openai.com/v1"
+  input: "./data/queries.jsonl"
+  output: "./data/tasks.jsonl"
+  min_agents: 1
+  cache: "./cache/label_cache.jsonl"
+  fallback_strategy: "keyword"
+
+dataset:
+  input: "./data/tasks.jsonl"
+  train_ratio: 0.7
+  val_ratio: 0.15
+  test_ratio: 0.15
+  output_dir: "./data/"
+
+training:
+  total_steps: 10000
+  max_steps_per_episode: 6
+  val_eval_freq: 1000
+  tfidf_max_features: 2000
+  hidden_layers: [128, 64]
+
+output_dir: "./artifacts/"

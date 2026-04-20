@@ -32,9 +32,7 @@ class LabelCache:
                 except (json.JSONDecodeError, KeyError):
                     continue
 
-    def lookup(
-        self, text: str, model: str, prompt_version: str
-    ) -> list[int] | None:
+    def lookup(self, text: str, model: str, prompt_version: str) -> list[int] | None:
         key = _make_key(text, model, prompt_version)
         entry = self._store.get(key)
         if entry is None:

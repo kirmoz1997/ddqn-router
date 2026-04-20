@@ -1,5 +1,12 @@
 # ddqn-router
 
+[![PyPI version](https://img.shields.io/pypi/v/ddqn-router.svg)](https://pypi.org/project/ddqn-router/)
+[![Python versions](https://img.shields.io/pypi/pyversions/ddqn-router.svg)](https://pypi.org/project/ddqn-router/)
+[![License](https://img.shields.io/pypi/l/ddqn-router.svg)](https://github.com/kirmoz1997/ddqn-router/blob/main/LICENSE)
+[![CI](https://github.com/kirmoz1997/ddqn-router/actions/workflows/ci.yml/badge.svg)](https://github.com/kirmoz1997/ddqn-router/actions/workflows/ci.yml)
+[![Downloads](https://img.shields.io/pypi/dm/ddqn-router.svg)](https://pypi.org/project/ddqn-router/)
+[![Docs](https://img.shields.io/badge/docs-mkdocs-blue.svg)](https://kirmoz1997.github.io/ddqn-router/)
+
 A lightweight Python library that trains a Double DQN agent to route user queries to the optimal *subset* of specialized agents in a multi-agent system.
 
 You define your agents, label a dataset with an LLM, train the router, and get a fast inference model that selects the right combination of agents for any input query — no LLM needed at inference time.
@@ -95,7 +102,7 @@ Standard DQN suffers from Q-value overestimation — it uses the same network to
 
 ## Quickstart
 
-[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/kirmoz1997/ddqn-router/blob/main/examples/quickstart.ipynb)
+[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/kirmoz1997/ddqn-router/blob/main/examples/colab_quickstart.ipynb)
 
 ### 1. Install
 
@@ -106,16 +113,16 @@ pip install ddqn-router
 Or install with the optional FastAPI server:
 
 ```bash
-pip install ddqn-router[serve]
+pip install "ddqn-router[serve]"
 ```
 
-For development (from source):
+For development (tests, linters, pre-commit):
 
 ```bash
-git clone https://github.com/kirmoz1997/ddqn-router
-cd ddqn-router
-pip install -e ".[dev]"
+pip install "ddqn-router[dev]"
 ```
+
+To set up a local development clone, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### 2. Define your agents
 
@@ -477,6 +484,48 @@ ddqn_router/
 └── serve/
     └── app.py               # Optional FastAPI server (pip install ddqn-router[serve])
 ```
+
+---
+
+## Deploy
+
+### Docker
+
+```bash
+docker run --rm -p 8000:8000 \
+  -v "$(pwd)/artifacts:/artifacts:ro" \
+  ghcr.io/kirmoz1997/ddqn-router:latest
+```
+
+### docker compose
+
+```yaml
+# docker-compose.yml
+services:
+  router:
+    image: ghcr.io/kirmoz1997/ddqn-router:latest
+    ports: ["8000:8000"]
+    volumes:
+      - ./artifacts:/artifacts:ro
+```
+
+```bash
+docker compose up -d
+curl -s -X POST http://localhost:8000/route \
+  -H 'content-type: application/json' \
+  -d '{"query":"my invoice was charged twice"}'
+```
+
+### Bare metal
+
+```bash
+pip install "ddqn-router[serve]"
+ddqn-router serve --artifacts ./artifacts --host 0.0.0.0 --port 8000
+```
+
+The bundled `/route` endpoint is **unauthenticated** by design. Put a reverse
+proxy (nginx/Caddy/Traefik/Cloudflare) in front of it to terminate TLS and
+enforce auth / rate limiting. See [docs/deployment.md](docs/deployment.md).
 
 ---
 

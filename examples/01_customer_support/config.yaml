@@ -1,0 +1,41 @@
+agents:
+  - id: 0
+    name: "Billing"
+    description: "invoice payment refund subscription charge"
+  - id: 1
+    name: "Technical"
+    description: "bug error api integration crash latency"
+  - id: 2
+    name: "Account"
+    description: "password login email profile permissions"
+  - id: 3
+    name: "Shipping"
+    description: "delivery tracking shipment address package"
+  - id: 4
+    name: "General"
+    description: "information question help info general"
+
+labeler:
+  model: "gpt-4o-mini"
+  base_url: "https://api.openai.com/v1"
+  input: "./data/queries.jsonl"
+  output: "./data/tasks.jsonl"
+  min_agents: 1
+  cache: "./cache/label_cache.jsonl"
+  fallback_strategy: "keyword"
+
+dataset:
+  input: "./data/tasks.jsonl"
+  train_ratio: 0.7
+  val_ratio: 0.15
+  test_ratio: 0.15
+  output_dir: "./data/"
+
+training:
+  total_steps: 10000
+  max_steps_per_episode: 6
+  val_eval_freq: 1000
+  tfidf_max_features: 2000
+  hidden_layers: [128, 64]
+
+output_dir: "./artifacts/"

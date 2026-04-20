@@ -35,9 +35,7 @@ class RoutingEnv:
         self._selected: set[int] = set()
         self._steps: int = 0
 
-    def reset(
-        self, tfidf_vec: np.ndarray, target_agents: list[int]
-    ) -> np.ndarray:
+    def reset(self, tfidf_vec: np.ndarray, target_agents: list[int]) -> np.ndarray:
         self._tfidf_vec = tfidf_vec
         self._target_agents = set(target_agents)
         self._selected = set()

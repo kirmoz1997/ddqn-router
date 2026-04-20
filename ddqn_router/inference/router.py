@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import NamedTuple
 
 import numpy as np
 import torch
@@ -15,11 +15,34 @@ from ddqn_router.rl.q_network import QNetwork
 from ddqn_router.rl.state_encoder import StateEncoder
 
 
-class RouteResult(NamedTuple):
+@dataclass(frozen=True)
+class StepTrace:
+    """Per-step structural trace of a routing decision."""
+
+    step_index: int
+    q_values: dict[int, float]
+    selected_action: int
+    stop_selected: bool
+    masked_agents: list[int]
+
+
+@dataclass
+class RouteResult:
+    """Result of routing a single query.
+
+    Attributes:
+        agents: Selected agent IDs.
+        agent_names: Names of selected agents, in selection order.
+        confidence: Scalar in [0, 1] derived from last-step Q-value dispersion.
+        steps: Number of routing steps taken.
+        steps_trace: Optional per-step trace (populated by ``route_verbose``).
+    """
+
     agents: list[int]
     agent_names: list[str]
     confidence: float
     steps: int
+    steps_trace: list[StepTrace] | None = field(default=None)
 
 
 class RouterNotTrainedError(Exception):
@@ -95,9 +118,7 @@ class DDQNRouter:
             num_agents=registry.num_agents,
             hidden_layers=config.training.hidden_layers,
         ).to(device)
-        q_net.load_state_dict(
-            torch.load(model_path, map_location=device, weights_only=True)
-        )
+        q_net.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
         q_net.eval()
         return cls(q_net, encoder, registry, config, device=device)
 
@@ -109,24 +130,21 @@ class DDQNRouter:
             for a in self._registry.all_agents()
         ]
 
-    def route(self, query: str) -> RouteResult:
-        """Route a single query to the optimal subset of agents.
-
-        Returns a ``RouteResult`` with the selected agent IDs, names,
-        a confidence score in [0, 1], and the number of routing steps.
-        """
+    def _rollout(
+        self, query: str, collect_trace: bool = False
+    ) -> tuple[list[int], list[np.ndarray], list[StepTrace] | None]:
+        """Run the greedy routing episode. Returns selected agents, q-value history, optional trace."""
         tfidf_vec = self._encoder.transform(query)
         num_agents = self._registry.num_agents
         selected: list[int] = []
         mask = np.zeros(num_agents, dtype=np.float32)
         steps = 0
         q_values_list: list[np.ndarray] = []
+        trace: list[StepTrace] | None = [] if collect_trace else None
 
         while True:
             state = np.concatenate([tfidf_vec, mask])
-            state_t = torch.tensor(
-                state, dtype=torch.float32, device=self._device
-            ).unsqueeze(0)
+            state_t = torch.tensor(state, dtype=torch.float32, device=self._device).unsqueeze(0)
 
             with torch.no_grad():
                 q_values = self._q_net(state_t).squeeze(0).cpu().numpy()
@@ -143,7 +161,20 @@ class DDQNRouter:
             action = int(np.argmax(masked_q))
             steps += 1
 
-            if action == num_agents:  # STOP
+            if trace is not None:
+                q_dict = {i: float(q_values[i]) for i in range(num_agents + 1) if action_mask[i]}
+                masked_agent_ids = [i for i in range(num_agents) if not action_mask[i]]
+                trace.append(
+                    StepTrace(
+                        step_index=steps - 1,
+                        q_values=q_dict,
+                        selected_action=action,
+                        stop_selected=(action == num_agents),
+                        masked_agents=masked_agent_ids,
+                    )
+                )
+
+            if action == num_agents:
                 break
             selected.append(action)
             mask[action] = 1.0
@@ -151,83 +182,84 @@ class DDQNRouter:
             if len(selected) >= num_agents or steps >= self._max_steps:
                 break
 
+        return selected, q_values_list, trace
+
+    def route(self, query: str) -> RouteResult:
+        """Route a single query to the optimal subset of agents.
+
+        Returns a ``RouteResult`` with the selected agent IDs, names,
+        a confidence score in [0, 1], and the number of routing steps.
+        """
+        selected, q_values_list, _ = self._rollout(query, collect_trace=False)
         confidence = self._compute_confidence(q_values_list)
         agent_names = [self._registry.get_by_id(a).name for a in selected]
         return RouteResult(
             agents=selected,
             agent_names=agent_names,
             confidence=confidence,
-            steps=steps,
+            steps=len(q_values_list),
         )
 
     def route_batch(self, queries: list[str]) -> list[RouteResult]:
         """Route multiple queries. Returns a list of ``RouteResult``."""
         return [self.route(q) for q in queries]
 
+    def route_verbose(self, query: str) -> RouteResult:
+        """Route a query and populate ``steps_trace`` with structural per-step info."""
+        selected, q_values_list, trace = self._rollout(query, collect_trace=True)
+        confidence = self._compute_confidence(q_values_list)
+        agent_names = [self._registry.get_by_id(a).name for a in selected]
+        return RouteResult(
+            agents=selected,
+            agent_names=agent_names,
+            confidence=confidence,
+            steps=len(q_values_list),
+            steps_trace=trace,
+        )
+
     def explain(self, query: str) -> None:
         """Print a step-by-step breakdown of routing decisions.
 
-        Shows Q-values for every agent and the STOP action at each
-        step, along with which agent was selected.
+        Shows Q-values for every agent and the STOP action at each step,
+        along with which agent was selected.
         """
-        tfidf_vec = self._encoder.transform(query)
         num_agents = self._registry.num_agents
-        selected: list[int] = []
-        mask = np.zeros(num_agents, dtype=np.float32)
-
         agent_names = self._registry.names()
         header = ["Step", "Selected"] + agent_names + ["STOP"]
         col_widths = [max(6, len(h)) for h in header]
 
-        print(f"\n  Query: \"{query}\"")
+        print(f'\n  Query: "{query}"')
         print(f"  {'─' * (sum(col_widths) + len(col_widths) * 3)}")
-        fmt_header = "  ".join(h.center(w) for h, w in zip(header, col_widths))
+        fmt_header = "  ".join(h.center(w) for h, w in zip(header, col_widths, strict=False))
         print(f"  {fmt_header}")
         print(f"  {'─' * (sum(col_widths) + len(col_widths) * 3)}")
 
-        step = 0
-        while True:
-            state = np.concatenate([tfidf_vec, mask])
-            state_t = torch.tensor(
-                state, dtype=torch.float32, device=self._device
-            ).unsqueeze(0)
+        result = self.route_verbose(query)
+        assert result.steps_trace is not None
 
-            with torch.no_grad():
-                q_values = self._q_net(state_t).squeeze(0).cpu().numpy()
+        for step_trace in result.steps_trace:
+            step_num = step_trace.step_index + 1
+            action = step_trace.selected_action
+            action_name = "STOP" if step_trace.stop_selected else agent_names[action]
 
-            action_mask = np.ones(num_agents + 1, dtype=bool)
-            if self._action_masking:
-                for a in selected:
-                    action_mask[a] = False
-
-            masked_q = q_values.copy()
-            masked_q[~action_mask] = float("-inf")
-            action = int(np.argmax(masked_q))
-            step += 1
-
-            action_name = "STOP" if action == num_agents else agent_names[action]
-
-            row_vals = [str(step), action_name]
+            row_vals = [str(step_num), action_name]
             for i in range(num_agents + 1):
-                if action_mask[i]:
-                    row_vals.append(f"{q_values[i]:.3f}")
+                if i in step_trace.q_values:
+                    row_vals.append(f"{step_trace.q_values[i]:.3f}")
                 else:
                     row_vals.append("  --  ")
-            row = "  ".join(v.center(w) for v, w in zip(row_vals, col_widths))
+            row = "  ".join(v.center(w) for v, w in zip(row_vals, col_widths, strict=False))
             print(f"  {row}")
 
-            if action == num_agents:
-                break
-            selected.append(action)
-            mask[action] = 1.0
-            if len(selected) >= num_agents or step >= self._max_steps:
-                break
-
-        print(f"\n  Result: {[agent_names[a] for a in selected]}")
+        print(f"\n  Result: {[agent_names[a] for a in result.agents]}")
         print()
 
     def _compute_confidence(self, q_values_list: list[np.ndarray]) -> float:
-        """Confidence = (max_q - mean_q) / (max_q - min_q + 1e-8), clipped to [0, 1]."""
+        """Confidence = (max_q - mean_q) / (max_q - min_q + 1e-8), clipped to [0, 1].
+
+        Computed over the valid (non-masked) Q-values at the **last** routing step.
+        Returns 0.0 if no steps were taken, 1.0 if fewer than 2 actions remain valid.
+        """
         if not q_values_list:
             return 0.0
         last_q = q_values_list[-1]

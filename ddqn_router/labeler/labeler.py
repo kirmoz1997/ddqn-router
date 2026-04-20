@@ -16,11 +16,20 @@ from ddqn_router.labeler.cache import LabelCache
 
 _DEFAULT_TEMPLATE = Path(__file__).parent / "prompt_template.j2"
 
+# USD per 1K prompt tokens (rough, input-side only; unknown models -> "n/a").
+_MODEL_PRICES: dict[str, float] = {
+    "gpt-4o-mini": 0.00015,
+    "gpt-4o": 0.0025,
+    "gpt-4-turbo": 0.01,
+    "gpt-3.5-turbo": 0.0005,
+    "deepseek-chat": 0.00014,
+    "claude-3-haiku-20240307": 0.00025,
+    "claude-3-5-sonnet-20240620": 0.003,
+}
+
 
 class LLMLabeler:
-    def __init__(
-        self, config: LabelerConfig, registry: AgentRegistry
-    ) -> None:
+    def __init__(self, config: LabelerConfig, registry: AgentRegistry) -> None:
         self.config = config
         self.registry = registry
         self.cache = LabelCache(config.cache)
@@ -135,14 +144,92 @@ class LLMLabeler:
                 except (json.JSONDecodeError, KeyError):
                     texts.append(line)
 
+        price_per_1k = _MODEL_PRICES.get(self.config.model)
+        cache_hits = 0
+        est_cost = 0.0
         count = 0
-        with open(out_path, "w") as out:
-            for text in texts:
-                result = self.label_one(text)
+
+        from rich.progress import (
+            BarColumn,
+            MofNCompleteColumn,
+            Progress,
+            TextColumn,
+            TimeElapsedColumn,
+            TimeRemainingColumn,
+        )
+
+        progress = Progress(
+            TextColumn("[bold blue]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TextColumn("[green]{task.fields[cache_rate]}"),
+            TextColumn("[yellow]{task.fields[cost]}"),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+        )
+
+        with progress, open(out_path, "w") as out:
+            task_id = progress.add_task(
+                "Labeling", total=len(texts), cache_rate="cache=0%", cost="cost=$0.000"
+            )
+            for idx, text in enumerate(texts, start=1):
+                before_hits = cache_hits
+                result, was_cache_hit, tokens = self._label_one_with_stats(text)
+                if was_cache_hit:
+                    cache_hits = before_hits + 1
+                elif price_per_1k is not None:
+                    est_cost += price_per_1k * (tokens / 1000.0)
+
                 if result is not None:
                     out.write(json.dumps(result) + "\n")
                     count += 1
+
+                cache_rate = f"cache={100 * cache_hits / idx:.0f}%"
+                cost_label = f"cost=${est_cost:.3f}" if price_per_1k is not None else "cost=n/a"
+                progress.update(task_id, advance=1, cache_rate=cache_rate, cost=cost_label)
         return count
+
+    def _label_one_with_stats(self, text: str) -> tuple[dict | None, bool, int]:
+        """Like ``label_one`` but also returns (was_cache_hit, approx_prompt_tokens)."""
+        cached = self.cache.lookup(text, self.config.model, self.config.prompt_version)
+        if cached is not None:
+            import uuid
+
+            return (
+                {
+                    "id": f"ex_{uuid.uuid4().hex[:8]}",
+                    "text": text,
+                    "required_agents": cached,
+                },
+                True,
+                0,
+            )
+
+        prompt = self._render_prompt(text)
+        approx_tokens = max(1, len(prompt) // 4)
+        try:
+            raw = self._call_llm(prompt)
+            agents = self._parse_response(raw)
+        except Exception:
+            agents = None
+
+        if agents is None:
+            agents = self._apply_fallback(text)
+        if agents is None:
+            return None, False, approx_tokens
+
+        self.cache.store(text, self.config.model, self.config.prompt_version, agents)
+        import uuid
+
+        return (
+            {
+                "id": f"ex_{uuid.uuid4().hex[:8]}",
+                "text": text,
+                "required_agents": agents,
+            },
+            False,
+            approx_tokens,
+        )
 
     def close(self) -> None:
         self._client.close()

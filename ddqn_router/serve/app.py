@@ -1,6 +1,6 @@
 """Optional FastAPI server for routing inference (requires 'serve' extras)."""
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from fastapi import FastAPI as _FastAPI
@@ -8,7 +8,7 @@ if TYPE_CHECKING:
 
 def create_app(
     artifacts_path: str,
-    cors_origins: Optional[list[str]] = None,
+    cors_origins: list[str] | None = None,
 ) -> "_FastAPI":
     """Create and return a FastAPI app that serves routing inference.
 
@@ -24,8 +24,7 @@ def create_app(
         from fastapi.middleware.cors import CORSMiddleware
     except ImportError:
         raise ImportError(
-            "FastAPI is required for the serve module. "
-            "Install with: pip install ddqn-router[serve]"
+            "FastAPI is required for the serve module. Install with: pip install ddqn-router[serve]"
         ) from None
 
     from pydantic import BaseModel as PydanticBaseModel
@@ -33,7 +32,9 @@ def create_app(
     from ddqn_router.inference.router import DDQNRouter
 
     ddqn_router = DDQNRouter.load(artifacts_path)
-    app = FastAPI(title="ddqn-router", version="0.2.0")
+    from ddqn_router import __version__
+
+    app = FastAPI(title="ddqn-router", version=__version__)
 
     if cors_origins is not None:
         app.add_middleware(
