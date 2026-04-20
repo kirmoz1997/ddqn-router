@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and discussion
+    url: https://github.com/kirmoz1997/ddqn-router/discussions
+    about: Ask a question, share a use case, or discuss an idea before filing a feature request.
+  - name: Security vulnerability
+    url: https://github.com/kirmoz1997/ddqn-router/blob/main/SECURITY.md
+    about: Do not file a public issue for security problems. See SECURITY.md for the private disclosure channel.

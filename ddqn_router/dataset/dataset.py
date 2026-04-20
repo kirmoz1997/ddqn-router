@@ -68,18 +68,18 @@ def compute_stats(tasks: list[Task], num_agents: int | None = None) -> dict:
 
 def print_stats(tasks: list[Task], num_agents: int | None = None) -> None:
     stats = compute_stats(tasks, num_agents)
-    print(f"\n  Dataset Statistics")
+    print("\n  Dataset Statistics")
     print(f"  {'─' * 40}")
     print(f"  Total examples: {stats['total_examples']}")
     print(
         f"  Set size: mean={stats['mean_set_size']:.2f}, "
         f"min={stats['min_set_size']}, max={stats['max_set_size']}"
     )
-    print(f"\n  Agent frequency:")
+    print("\n  Agent frequency:")
     for aid, cnt in stats["agent_frequency"].items():
         pct = 100 * cnt / stats["total_examples"] if stats["total_examples"] else 0
         print(f"    Agent {aid}: {cnt} ({pct:.1f}%)")
-    print(f"\n  Set size distribution:")
+    print("\n  Set size distribution:")
     for size, cnt in stats["set_size_distribution"].items():
         pct = 100 * cnt / stats["total_examples"] if stats["total_examples"] else 0
         print(f"    Size {size}: {cnt} ({pct:.1f}%)")

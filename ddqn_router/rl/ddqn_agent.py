@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
+import pickle
 import random
-import sys
 import time
 from pathlib import Path
 
@@ -76,7 +76,85 @@ def _run_episode_for_eval(
     return env.selected_agents
 
 
-def train(config: RouterConfig) -> dict:
+def _save_checkpoint(
+    ckpt_dir: Path,
+    q_online: QNetwork,
+    q_target: QNetwork,
+    optimizer: optim.Optimizer,
+    step: int,
+    epsilon: float,
+    best_val_jaccard: float,
+    replay: ReplayBuffer | None = None,
+) -> None:
+    """Persist full training state to ``ckpt_dir`` (file I/O only; no logic change)."""
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    torch.save(q_online.state_dict(), ckpt_dir / "model.pt")
+    torch.save(q_target.state_dict(), ckpt_dir / "target_model.pt")
+    torch.save(optimizer.state_dict(), ckpt_dir / "optimizer_state.pt")
+    torch.save(
+        {
+            "python": random.getstate(),
+            "numpy": np.random.get_state(),
+            "torch": torch.get_rng_state(),
+            "torch_cuda": (torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None),
+        },
+        ckpt_dir / "rng_state.pt",
+    )
+    with open(ckpt_dir / "step.json", "w") as f:
+        json.dump(
+            {
+                "step": step,
+                "epsilon": epsilon,
+                "best_val_jaccard": best_val_jaccard,
+            },
+            f,
+        )
+    if replay is not None:
+        with open(ckpt_dir / "replay_buffer.pkl", "wb") as rf:
+            pickle.dump(replay.snapshot(), rf)
+
+
+def _load_checkpoint(
+    ckpt_dir: Path,
+    q_online: QNetwork,
+    q_target: QNetwork,
+    optimizer: optim.Optimizer,
+    replay: ReplayBuffer,
+    device: torch.device,
+) -> tuple[int, float]:
+    """Restore training state from ``ckpt_dir``. Returns (step, best_val_jaccard)."""
+    q_online.load_state_dict(
+        torch.load(ckpt_dir / "model.pt", map_location=device, weights_only=True)
+    )
+    q_target.load_state_dict(
+        torch.load(ckpt_dir / "target_model.pt", map_location=device, weights_only=True)
+    )
+    optimizer.load_state_dict(
+        torch.load(ckpt_dir / "optimizer_state.pt", map_location=device, weights_only=True)
+    )
+    rng_path = ckpt_dir / "rng_state.pt"
+    if rng_path.exists():
+        rng = torch.load(rng_path, weights_only=False)
+        random.setstate(rng["python"])
+        np.random.set_state(rng["numpy"])
+        torch.set_rng_state(rng["torch"])
+        if rng.get("torch_cuda") is not None and torch.cuda.is_available():
+            torch.cuda.set_rng_state_all(rng["torch_cuda"])
+    with open(ckpt_dir / "step.json") as f:
+        meta = json.load(f)
+    replay_path = ckpt_dir / "replay_buffer.pkl"
+    if replay_path.exists():
+        with open(replay_path, "rb") as rf:
+            for transition in pickle.load(rf):
+                replay.add(transition)
+    return int(meta["step"]), float(meta.get("best_val_jaccard", -1.0))
+
+
+def train(
+    config: RouterConfig,
+    resume_from: str | Path | None = None,
+    save_replay: bool = False,
+) -> dict:
     cfg = config.training
     _set_seeds(cfg.seed)
 
@@ -86,6 +164,7 @@ def train(config: RouterConfig) -> dict:
 
     output_dir = Path(config.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    checkpoint_dir = output_dir / "checkpoint"
 
     data_dir = Path(config.dataset.input).parent
     train_tasks = load_tasks(data_dir / "train.jsonl")
@@ -123,130 +202,175 @@ def train(config: RouterConfig) -> dict:
     total_loss = 0.0
     loss_count = 0
 
+    if resume_from is not None:
+        resume_path = Path(resume_from)
+        global_step, best_val_jaccard = _load_checkpoint(
+            resume_path, q_online, q_target, optimizer, replay, device
+        )
+        print(
+            f"  Resumed from {resume_path} at step {global_step} "
+            f"(best_val_jaccard={best_val_jaccard:.4f})"
+        )
+
     t_start = time.time()
     print(f"\n  Training DDQN router ({cfg.total_steps} steps, device={device})")
     print(f"  {'─' * 60}")
 
-    while global_step < cfg.total_steps:
-        task = random.choice(train_tasks)
-        tfidf_vec = encoder.transform(task["text"])
-        state = env.reset(tfidf_vec, task["required_agents"])
-        done = False
+    from rich.console import Console
+    from rich.live import Live
+    from rich.panel import Panel
 
-        while not done and global_step < cfg.total_steps:
-            epsilon = _get_epsilon(global_step, cfg)
-            action_mask = env.get_action_mask()
-            action = _select_action(
-                q_online, state, action_mask, epsilon, env.num_actions, device
-            )
-            next_state, reward, done = env.step(action)
-            next_mask = env.get_action_mask()
+    console = Console()
 
-            replay.add(
-                Transition(state, action, reward, next_state, done, next_mask)
-            )
-            state = next_state
-            global_step += 1
+    def _render(step: int, eps: float, avg_loss: float, val_jacc: float, eta_s: float) -> Panel:
+        elapsed = time.time() - t_start
+        body = (
+            f"step       : {step:>7d} / {cfg.total_steps}\n"
+            f"epsilon    : {eps:.4f}\n"
+            f"loss (ma)  : {avg_loss:.5f}\n"
+            f"val jaccard: {val_jacc:.4f}\n"
+            f"elapsed    : {elapsed:.0f}s\n"
+            f"eta        : {eta_s:.0f}s"
+        )
+        return Panel(body, title="ddqn-router train", border_style="cyan")
 
-            # Training step
-            if len(replay) >= cfg.min_replay_size:
-                batch = replay.sample(cfg.batch_size)
-                states_b = torch.tensor(
-                    np.array([t.state for t in batch]),
-                    dtype=torch.float32,
-                    device=device,
+    with Live(
+        _render(global_step, 0.0, 0.0, best_val_jaccard, 0.0),
+        console=console,
+        refresh_per_second=4,
+        transient=False,
+    ) as live:
+        epsilon = _get_epsilon(global_step, cfg)
+        while global_step < cfg.total_steps:
+            task = random.choice(train_tasks)
+            tfidf_vec = encoder.transform(task["text"])
+            state = env.reset(tfidf_vec, task["required_agents"])
+            done = False
+
+            while not done and global_step < cfg.total_steps:
+                epsilon = _get_epsilon(global_step, cfg)
+                action_mask = env.get_action_mask()
+                action = _select_action(
+                    q_online, state, action_mask, epsilon, env.num_actions, device
                 )
-                actions_b = torch.tensor(
-                    [t.action for t in batch], dtype=torch.long, device=device
-                )
-                rewards_b = torch.tensor(
-                    [t.reward for t in batch], dtype=torch.float32, device=device
-                )
-                next_states_b = torch.tensor(
-                    np.array([t.next_state for t in batch]),
-                    dtype=torch.float32,
-                    device=device,
-                )
-                dones_b = torch.tensor(
-                    [t.done for t in batch], dtype=torch.float32, device=device
-                )
-                next_masks_b = torch.tensor(
-                    np.array([t.mask for t in batch]),
-                    dtype=torch.bool,
-                    device=device,
-                )
+                next_state, reward, done = env.step(action)
+                next_mask = env.get_action_mask()
 
-                # Double DQN: action selection from online, value from target
-                with torch.no_grad():
-                    q_online_next = q_online(next_states_b)
-                    q_online_next[~next_masks_b] = float("-inf")
-                    best_actions = q_online_next.argmax(dim=1)
+                replay.add(Transition(state, action, reward, next_state, done, next_mask))
+                state = next_state
+                global_step += 1
 
-                    q_target_next = q_target(next_states_b)
-                    target_vals = q_target_next.gather(
-                        1, best_actions.unsqueeze(1)
-                    ).squeeze(1)
-                    td_target = rewards_b + cfg.gamma * target_vals * (1 - dones_b)
+                # Training step
+                if len(replay) >= cfg.min_replay_size:
+                    batch = replay.sample(cfg.batch_size)
+                    states_b = torch.tensor(
+                        np.array([t.state for t in batch]),
+                        dtype=torch.float32,
+                        device=device,
+                    )
+                    actions_b = torch.tensor(
+                        [t.action for t in batch], dtype=torch.long, device=device
+                    )
+                    rewards_b = torch.tensor(
+                        [t.reward for t in batch], dtype=torch.float32, device=device
+                    )
+                    next_states_b = torch.tensor(
+                        np.array([t.next_state for t in batch]),
+                        dtype=torch.float32,
+                        device=device,
+                    )
+                    dones_b = torch.tensor(
+                        [t.done for t in batch], dtype=torch.float32, device=device
+                    )
+                    next_masks_b = torch.tensor(
+                        np.array([t.mask for t in batch]),
+                        dtype=torch.bool,
+                        device=device,
+                    )
 
-                q_current = q_online(states_b).gather(
-                    1, actions_b.unsqueeze(1)
-                ).squeeze(1)
-                loss = loss_fn(q_current, td_target)
+                    # Double DQN: action selection from online, value from target
+                    with torch.no_grad():
+                        q_online_next = q_online(next_states_b)
+                        q_online_next[~next_masks_b] = float("-inf")
+                        best_actions = q_online_next.argmax(dim=1)
 
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
+                        q_target_next = q_target(next_states_b)
+                        target_vals = q_target_next.gather(1, best_actions.unsqueeze(1)).squeeze(1)
+                        td_target = rewards_b + cfg.gamma * target_vals * (1 - dones_b)
 
-                total_loss += loss.item()
-                loss_count += 1
+                    q_current = q_online(states_b).gather(1, actions_b.unsqueeze(1)).squeeze(1)
+                    loss = loss_fn(q_current, td_target)
 
-            # Target network sync
-            if global_step % cfg.target_update_freq == 0:
-                q_target.load_state_dict(q_online.state_dict())
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
 
-            # Validation eval
-            if global_step % cfg.val_eval_freq == 0 and val_tasks:
-                val_preds = []
-                val_targets = []
-                for vt in val_tasks:
-                    pred = _run_episode_for_eval(q_online, vt, encoder, env, device)
-                    val_preds.append(pred)
-                    val_targets.append(set(vt["required_agents"]))
+                    total_loss += loss.item()
+                    loss_count += 1
 
-                val_metrics = evaluate_routing(val_preds, val_targets)
-                avg_loss = total_loss / loss_count if loss_count else 0.0
-                elapsed = time.time() - t_start
+                # Target network sync
+                if global_step % cfg.target_update_freq == 0:
+                    q_target.load_state_dict(q_online.state_dict())
 
-                log_entry = {
-                    "step": global_step,
-                    "epsilon": round(epsilon, 4),
-                    "avg_loss": round(avg_loss, 6),
-                    "val_jaccard": round(val_metrics["mean_jaccard"], 4),
-                    "val_f1": round(val_metrics["mean_f1"], 4),
-                    "elapsed_s": round(elapsed, 1),
-                }
-                training_log.append(log_entry)
+                # Validation eval
+                if global_step % cfg.val_eval_freq == 0 and val_tasks:
+                    val_preds = []
+                    val_targets = []
+                    for vt in val_tasks:
+                        pred = _run_episode_for_eval(q_online, vt, encoder, env, device)
+                        val_preds.append(pred)
+                        val_targets.append(set(vt["required_agents"]))
 
-                sys.stdout.write(
-                    f"\r  step {global_step:>7d}/{cfg.total_steps}"
-                    f"  eps={epsilon:.3f}"
-                    f"  loss={avg_loss:.5f}"
-                    f"  val_jacc={val_metrics['mean_jaccard']:.4f}"
-                    f"  val_f1={val_metrics['mean_f1']:.4f}"
-                    f"  [{elapsed:.0f}s]"
-                )
-                sys.stdout.flush()
+                    val_metrics = evaluate_routing(val_preds, val_targets)
+                    avg_loss = total_loss / loss_count if loss_count else 0.0
+                    elapsed = time.time() - t_start
+                    eta = elapsed * (cfg.total_steps - global_step) / max(global_step, 1)
 
-                total_loss = 0.0
-                loss_count = 0
+                    log_entry = {
+                        "step": global_step,
+                        "epsilon": round(epsilon, 4),
+                        "avg_loss": round(avg_loss, 6),
+                        "val_jaccard": round(val_metrics["mean_jaccard"], 4),
+                        "val_f1": round(val_metrics["mean_f1"], 4),
+                        "elapsed_s": round(elapsed, 1),
+                    }
+                    training_log.append(log_entry)
 
-                if cfg.save_best and val_metrics["mean_jaccard"] > best_val_jaccard:
-                    best_val_jaccard = val_metrics["mean_jaccard"]
-                    best_val_metrics = val_metrics
-                    torch.save(q_online.state_dict(), output_dir / "model.pt")
-                    encoder.save(output_dir / "encoder.joblib")
+                    live.update(
+                        _render(
+                            global_step,
+                            epsilon,
+                            avg_loss,
+                            val_metrics["mean_jaccard"],
+                            eta,
+                        )
+                    )
 
-    print()
+                    total_loss = 0.0
+                    loss_count = 0
+
+                    if cfg.save_best and val_metrics["mean_jaccard"] > best_val_jaccard:
+                        best_val_jaccard = val_metrics["mean_jaccard"]
+                        best_val_metrics = val_metrics
+                        torch.save(q_online.state_dict(), output_dir / "model.pt")
+                        encoder.save(output_dir / "encoder.joblib")
+
+                # Periodic checkpoint
+                if (
+                    cfg.checkpoint_freq > 0
+                    and global_step > 0
+                    and global_step % cfg.checkpoint_freq == 0
+                ):
+                    _save_checkpoint(
+                        checkpoint_dir,
+                        q_online,
+                        q_target,
+                        optimizer,
+                        global_step,
+                        epsilon,
+                        best_val_jaccard,
+                        replay if save_replay else None,
+                    )
 
     # Save final artifacts if no best-save happened
     if not (output_dir / "model.pt").exists():
@@ -285,6 +409,18 @@ def train(config: RouterConfig) -> dict:
     with open(output_dir / "training_log.jsonl", "w") as f:
         for entry in training_log:
             f.write(json.dumps(entry) + "\n")
+
+    # Final checkpoint (so --resume can be used from the end state too).
+    _save_checkpoint(
+        checkpoint_dir,
+        q_online,
+        q_target,
+        optimizer,
+        global_step,
+        epsilon,
+        best_val_jaccard,
+        replay if save_replay else None,
+    )
 
     print(f"\n  Artifacts saved to {output_dir}/")
     if test_metrics:

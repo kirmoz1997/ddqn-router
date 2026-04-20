@@ -5,9 +5,7 @@ from __future__ import annotations
 from ddqn_router.rl.reward import jaccard_similarity
 
 
-def _precision_recall_f1(
-    predicted: set[int], target: set[int]
-) -> tuple[float, float, float]:
+def _precision_recall_f1(predicted: set[int], target: set[int]) -> tuple[float, float, float]:
     if not predicted and not target:
         return 1.0, 1.0, 1.0
     if not predicted:
@@ -114,8 +112,10 @@ def print_metrics(metrics: dict, label: str = "Evaluation") -> None:
             bucket = metrics[key]
             name = key.replace("bucket_", "").replace("_", " ")
             print(f"\n  [{name}] (n={bucket['n']})")
-            print(f"    Jaccard: {bucket['mean_jaccard']:.4f}  "
-                  f"P: {bucket['mean_precision']:.4f}  "
-                  f"R: {bucket['mean_recall']:.4f}  "
-                  f"F1: {bucket['mean_f1']:.4f}")
+            print(
+                f"    Jaccard: {bucket['mean_jaccard']:.4f}  "
+                f"P: {bucket['mean_precision']:.4f}  "
+                f"R: {bucket['mean_recall']:.4f}  "
+                f"F1: {bucket['mean_f1']:.4f}"
+            )
     print()

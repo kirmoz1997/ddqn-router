@@ -30,3 +30,13 @@ class ReplayBuffer:
 
     def __len__(self) -> int:
         return len(self._buffer)
+
+    def snapshot(self) -> list[Transition]:
+        """Return a list copy of current transitions (for checkpoint I/O)."""
+        return list(self._buffer)
+
+    def restore(self, transitions: list[Transition]) -> None:
+        """Replace current contents with the given transitions (for resume I/O)."""
+        self._buffer.clear()
+        for t in transitions:
+            self._buffer.append(t)

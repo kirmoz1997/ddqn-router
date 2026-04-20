@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ddqn-router"
-version = "0.2.0"
+version = "0.3.0"
 description = "Train a Double DQN router that selects an optimal subset of agents for any multi-agent system."
 readme = "README.md"
 license = { text = "MIT" }
@@ -21,7 +21,7 @@ keywords = [
   "agent-orchestration",
 ]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
   "Intended Audience :: Science/Research",
   "License :: OSI Approved :: MIT License",
@@ -32,32 +32,89 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
   "Topic :: Software Development :: Libraries :: Python Modules",
+  "Typing :: Typed",
 ]
 
 dependencies = [
     "torch>=2.0",
     "scikit-learn>=1.3",
     "numpy",
-    "typer>=0.9",
+    "typer>=0.12",
     "pydantic>=2.0",
     "jinja2",
     "httpx",
     "joblib",
     "pyyaml",
+    "rich>=13.0",
 ]
 
 [project.optional-dependencies]
 serve = ["fastapi", "uvicorn"]
-dev = ["pytest", "pandas", "matplotlib", "tqdm"]
+dev = [
+    "pytest>=8",
+    "pytest-cov",
+    "ruff>=0.6",
+    "mypy>=1.10",
+    "pytest-httpx",
+    "pre-commit",
+    "pandas",
+    "matplotlib",
+]
+docs = [
+    "mkdocs-material",
+    "mkdocs-include-markdown-plugin",
+]
 
 [project.scripts]
 ddqn-router = "ddqn_router.cli:app"
 
 [project.urls]
 Homepage = "https://github.com/kirmoz1997/ddqn-router"
-Repository = "https://github.com/kirmoz1997/ddqn-router"
-"Bug Tracker" = "https://github.com/kirmoz1997/ddqn-router/issues"
+Documentation = "https://kirmoz1997.github.io/ddqn-router/"
+Source = "https://github.com/kirmoz1997/ddqn-router"
+Issues = "https://github.com/kirmoz1997/ddqn-router/issues"
+Changelog = "https://github.com/kirmoz1997/ddqn-router/blob/main/CHANGELOG.md"
 Research = "https://github.com/kirmoz1997/dqn_routing_research"
 
 [tool.setuptools.packages.find]
 include = ["ddqn_router*"]
+
+[tool.setuptools.package-data]
+ddqn_router = ["py.typed", "labeler/prompt_template.j2"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "N", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B", "N"]
+"ddqn_router/eval/*" = ["B", "F841"]
+"ddqn_router/rl/*" = ["B", "N", "F841", "SIM"]
+"ddqn_router/env/*" = ["B", "N", "F841", "SIM"]
+
+[tool.mypy]
+python_version = "3.10"
+strict_optional = true
+warn_unused_ignores = true
+ignore_missing_imports = true
+disable_error_code = ["import-untyped"]
+
+[[tool.mypy.overrides]]
+module = "ddqn_router.rl.*"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "ddqn_router.env.*"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "ddqn_router.eval.*"
+ignore_errors = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
