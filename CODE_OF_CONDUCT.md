@@ -23,7 +23,7 @@ officially representing the community in public spaces.
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported to the project maintainer at:
 
-> `conduct@<maintainer-domain>` *(maintainer: please fill in)*
+> `kirillmozolev35@gmail.com`
 
 All complaints will be reviewed and investigated promptly and fairly. The
 maintainer is obligated to respect the privacy and security of the reporter
